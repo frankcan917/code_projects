@@ -1,22 +1,25 @@
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QGridLayout, QWidget, QSizePolicy, QMessageBox
-from PyQt5.QtCore import QTimer, Qt, QDateTime
+from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QGridLayout, QWidget, QSizePolicy, QMessageBox, \
+    QInputDialog
+from PyQt5.QtCore import QTimer, Qt, QEventLoop
 from PyQt5.QtGui import QFont, QPalette, QColor
 
-#Main app window from QWidget, customizes layout and buttons
-class StopwatchApp(QWidget):
+
+# Main app window from QWidget, customizes layout and buttons
+class StopwatchWindow(QWidget):
     def __init__(self):
         super().__init__()
 
         self.times_list = []
-
         self.elapsed_time = 0
         self.is_running = False
+        self.button_press_count = 0
+        self.reset_button_pressed = False  # Initialize the flag
 
         self.timer_label = QLabel('00:00:00')
         self.timer_label.setAlignment(Qt.AlignCenter)
-        self.timer_label.setFont(QFont('Arial', 80, QFont.Bold))  # Set font size to 80 and bold
+        self.timer_label.setFont(QFont('Arial', 60, QFont.Bold))
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_stopwatch)
@@ -54,109 +57,124 @@ class StopwatchApp(QWidget):
         layout.addWidget(self.reset_button, 2, 0)
         layout.addWidget(self.add_time_button, 2, 1)
 
-        # Set button size policies to make them expand to fill available space
         self.start_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.stop_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.reset_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.add_time_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # Set the background color to dark gray
         palette = self.palette()
         palette.setColor(QPalette.Background, QColor(70, 70, 70))
         self.setAutoFillBackground(True)
         self.setPalette(palette)
 
-    #starts the timer when start button is clicked
     def start_timer(self):
         if not self.is_running:
             self.start_button.setEnabled(False)
             self.stop_button.setEnabled(True)
             self.reset_button.setEnabled(False)
-            self.timer.start(10)  # Update every 10 milliseconds
+            self.timer.start(10)
             self.is_running = True
 
-    #stops the timer when stop is clicked, prompts user to confirm the stop and asks to save records
     def stop_timer(self):
         if self.is_running:
-            self.timer.stop()
+            loop = QEventLoop()
+            QTimer.singleShot(0, loop.quit)  # Delay execution to allow processing of events
+            loop.exec_()  # Start the event loop
+
             reply = QMessageBox.question(
                 self, "Stop Timer", "Are you sure you want to stop the time?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No
             )
             if reply == QMessageBox.Yes:
+                self.timer.stop()
                 self.is_running = False
                 self.start_button.setEnabled(True)
                 self.stop_button.setEnabled(False)
                 self.reset_button.setEnabled(True)
                 self.confirm_save()
             else:
-                self.timer.start(10)  # Restart the timer
+                self.timer.start(10)
 
-    #Displays a confirmation message box asking if the user wants to save the recorded times.
+    def reset_timer(self):
+        self.elapsed_time = 0
+        self.button_press_count = 0
+        self.update_display()
+        self.times_list.clear()
+        self.reset_button.setEnabled(False)
+        self.reset_button_pressed = True
+
+    def update_stopwatch(self):
+        self.elapsed_time += 10
+        self.update_display()
+
+    def get_formatted_time(self, milliseconds):
+        seconds = int(milliseconds / 1000) % 60
+        minutes = int((milliseconds / (1000 * 60)) % 60)
+        hours = int((milliseconds / (1000 * 60 * 60)) % 24)
+
+        return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+    def update_display(self):
+        time_str = self.get_formatted_time(self.elapsed_time)
+        self.timer_label.setText(time_str)
+
+    def add_time_to_list(self):
+        if self.is_running:
+            self.times_list.append(self.elapsed_time)
+            formatted_time = self.get_formatted_time(self.elapsed_time)
+            self.button_press_count += 1
+            print(f"Question: {self.button_press_count}. Time: {formatted_time}")
+
+    def save_times_to_file(self, folder, filename):
+        os.makedirs(folder, exist_ok=True)
+        filepath = os.path.join(folder, filename)
+
+        with open(filepath, 'w') as file:
+            if self.reset_button_pressed:
+                self.button_press_count = 1  # Reset the button_press_count to 0 only if the reset button was pressed
+                self.reset_button_pressed = False  # Reset the flag
+
+            for elapsed_time in self.times_list:
+                formatted_time = self.get_formatted_time(elapsed_time)
+                line = f"Question: {self.button_press_count}. Time: {formatted_time}\n"
+                file.write(line)
+                self.button_press_count += 1
+
+    def save_times(self, file_name):
+        folder = r"C:\Users\FrankCandreva\PycharmProjects\testing\spacebar_presses"
+        filename = f'{file_name}.txt'
+        self.save_times_to_file(folder, filename)
+
     def confirm_save(self):
         reply = QMessageBox.question(
             self, "Save Times", "Do you want to save the recorded times?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
         )
         if reply == QMessageBox.Yes:
-            self.save_times()
+            file_name, ok = QInputDialog.getText(self, "Save Times", "Enter a file name:")
+            if ok and file_name:
+                self.reset_button_pressed = True  # Set the flag to True here
+                self.save_times(file_name)
 
-    #Resets the timer and clears the list of recorded times when the "Reset" button is clicked.
-    def reset_timer(self):
-        self.elapsed_time = 0
-        self.update_display()
-        self.times_list.clear()
-        self.reset_button.setEnabled(False)
-
-#called every 10 millisecs to update timer
-    def update_stopwatch(self):
-        self.elapsed_time += 10  # 10 milliseconds
-        self.update_display()
-
-#updates stopwatch display with current elapsed time
-    def update_display(self):
-        # Format elapsed_time into HH:MM:SS
-        milliseconds = self.elapsed_time
-        seconds = int(milliseconds / 1000) % 60
-        minutes = int((milliseconds / (1000 * 60)) % 60)
-        hours = int((milliseconds / (1000 * 60 * 60)) % 24)
-
-        time_str = f"{hours:02}:{minutes:02}:{seconds:02}"
-        self.timer_label.setText(time_str)
-
-#records the current elapsed time to a list when "add time" button is pressed(spacebar)
-    def add_time_to_list(self):
+    def closeEvent(self, event):
         if self.is_running:
-            self.times_list.append(self.elapsed_time)
+            reply = QMessageBox.question(
+                self, "Stop Timer", "Are you sure you want to close the application?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self.timer.stop()
+                self.is_running = False
+                self.save_times("recorded_times")
+                event.accept()
+            else:
+                event.ignore()
 
-#saves list of elapsed times ti a file
-    def save_times_to_file(self, folder, filename):
-        # Create the folder if it doesn't exist
-        os.makedirs(folder, exist_ok=True)
-
-        filepath = os.path.join(folder, filename)
-
-        with open(filepath, 'w') as file:
-            for elapsed_time in self.times_list:
-                # Convert elapsed_time to HH:MM:SS format
-                seconds = int(elapsed_time / 1000) % 60
-                minutes = int((elapsed_time / (1000 * 60)) % 60)
-                hours = int((elapsed_time / (1000 * 60 * 60)) % 24)
-
-                time_str = f"{hours:02}:{minutes:02}:{seconds:02}"
-                file.write(time_str + '\n')
-
-#generates timestamp andfile name, calls save_time_to_file to save the times in specific file/ folder
-    def save_times(self):
-        current_datetime = QDateTime.currentDateTime()
-        timestamp = current_datetime.toString("yyyyMMdd_hhmmss")
-        folder = r"C:\Users\FrankCandreva\PycharmProjects\testing\spacebar_presses"  # Use a raw string (r"") to represent the folder path
-        filename = f'DMA_interview_times_{timestamp}.txt'  # Add timestamp to the filename
-        self.save_times_to_file(folder, filename)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    stopwatch_app = StopwatchApp()
+    stopwatch_app = StopwatchWindow()
     stopwatch_app.setWindowTitle('Stopwatch App')
+    stopwatch_app.setGeometry(150, 1400, 200, 200)
     stopwatch_app.show()
     sys.exit(app.exec_())
